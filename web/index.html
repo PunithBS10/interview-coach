@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Interview Coach (Realtime Voice)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; }
+      button { padding: 10px 16px; font-size: 16px; }
+      #log { white-space: pre-wrap; background: #111; color: #ddd; padding: 12px; border-radius: 8px; }
+      .row { display: flex; gap: 8px; align-items: center; margin: 12px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Interview Coach — Realtime Voice</h1>
+    <div class="row">
+      <button id="start">Start session</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <audio id="remote" autoplay></audio>
+    <div id="log"></div>
+
+    <script>
+      const startBtn = document.getElementById('start');
+      const stopBtn  = document.getElementById('stop');
+      const remoteEl = document.getElementById('remote');
+      const logEl    = document.getElementById('log');
+
+      let pc, dc, localStream, ek;
+
+      function log(msg){ logEl.textContent += msg + "\n"; }
+
+      async function start() {
+        startBtn.disabled = true;
+        try {
+          // 1) Ask our backend for an ephemeral key
+          const ekResp = await fetch('http://localhost:8787/session', { method: 'POST' });
+          const { ephemeral_key } = await ekResp.json();
+          if(!ephemeral_key) throw new Error('No ephemeral key returned');
+          ek = ephemeral_key;
+          log('Ephemeral key obtained.');
+
+          // 2) Get mic
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const track = localStream.getAudioTracks()[0];
+
+          // 3) Set up WebRTC PeerConnection
+          pc = new RTCPeerConnection();
+          pc.ontrack = (e) => { remoteEl.srcObject = e.streams[0]; };
+          pc.addTrack(track, localStream);
+
+          // Data channel to exchange events/messages if needed
+          dc = pc.createDataChannel('oai-events');
+          dc.onopen = () => log('DataChannel open.');
+          dc.onmessage = (ev) => log('DC message: ' + ev.data);
+
+          // 4) Create SDP offer
+          const offer = await pc.createOffer({ offerToReceiveAudio: true });
+          await pc.setLocalDescription(offer);
+
+          // 5) Send offer SDP to OpenAI Realtime; auth with ephemeral key
+          const realtimeUrl = 'https://api.openai.com/v1/realtime?model=gpt-realtime';
+          const sdpResp = await fetch(realtimeUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${ek}`,
+              'Content-Type': 'application/sdp'
+            },
+            body: offer.sdp
+          });
+          if(!sdpResp.ok){
+            const txt = await sdpResp.text();
+            throw new Error('Realtime SDP exchange failed: ' + txt);
+          }
+          const answerSDP = await sdpResp.text();
+          await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP });
+
+          // 6) (Optional) Nudge the coach to begin with a greeting over the data channel
+          // Many Realtime setups will auto-greet based on session instructions; if not, send a message:
+          setTimeout(() => {
+            if (dc?.readyState === 'open') {
+              dc.send(JSON.stringify({
+                type: 'response.create',
+                response: { instructions: 'Please start with one interview question.' }
+              }));
+            }
+          }, 1200);
+
+          stopBtn.disabled = false;
+          log('Connected. Speak when ready.');
+        } catch (e) {
+          log('Error: ' + e.message);
+          startBtn.disabled = false;
+        }
+      }
+
+      async function stop() {
+        stopBtn.disabled = true;
+        try {
+          if (dc) dc.close();
+          if (pc) pc.close();
+          localStream?.getTracks()?.forEach(t => t.stop());
+          log('Stopped.');
+        } finally {
+          startBtn.disabled = false;
+        }
+      }
+
+      startBtn.onclick = start;
+      stopBtn.onclick = stop;
+    </script>
+  </body>
+</html>
