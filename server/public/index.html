@@ -1,112 +1,341 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Interview Coach (Realtime Voice)</title>
-    <style>
-      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; }
-      button { padding: 10px 16px; font-size: 16px; }
-      #log { white-space: pre-wrap; background: #111; color: #ddd; padding: 12px; border-radius: 8px; }
-      .row { display: flex; gap: 8px; align-items: center; margin: 12px 0; }
-    </style>
-  </head>
-  <body>
-    <h1>Interview Coach — Realtime Voice</h1>
-    <div class="row">
-      <button id="start">Start session</button>
-      <button id="stop" disabled>Stop</button>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AI Interview Coach — Realtime Voice</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0f1623;
+      --panel: #1a2332;
+      --panel-dark: #121a27;
+      --text: #e6eefc;
+      --muted: #9fb3d1;
+      --accent: #4ad1a8;
+      --accent-2: #4aa3ff;
+      --danger: #ff6b6b;
+      --shadow: rgba(0,0,0,0.35);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 32px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      color: var(--text); background: linear-gradient(180deg, #0d1420 0%, #0b1120 100%);
+    }
+    h1 {
+      margin: 0 0 8px; text-align: center; letter-spacing: 0.5px;
+      font-weight: 800; font-size: 48px; color: #7fb3ff;
+      text-shadow: 0 6px 24px rgba(74,163,255,0.25);
+    }
+    .subtitle { text-align: center; color: var(--muted); margin-bottom: 24px; }
+
+    .panel {
+      background: var(--panel);
+      box-shadow: 0 12px 28px var(--shadow);
+      border-radius: var(--radius);
+      padding: 18px;
+      border: 1px solid #1e2a3d;
+    }
+
+    .grid {
+      display: grid; gap: 16px;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+    .grid .field { grid-column: span 2; display: flex; flex-direction: column; gap: 6px; }
+    label { color: var(--muted); font-size: 13px; }
+    select {
+      width: 100%; padding: 12px 12px; border-radius: 10px;
+      background: var(--panel-dark); color: var(--text); border: 1px solid #26344a;
+      outline: none; transition: border .15s ease;
+    }
+    select:focus { border-color: var(--accent-2); }
+
+    .stage {
+      margin-top: 18px;
+      padding: 24px; border-radius: var(--radius);
+      background: var(--panel);
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+      border: 1px solid #1e2a3d;
+    }
+    .timer {
+      font-size: 54px; font-weight: 800; letter-spacing: 3px; color: #9fc4ff;
+      text-shadow: 0 10px 24px rgba(159,196,255,.25);
+    }
+    .wave {
+      width: min(560px, 92%); height: 200px;
+      background: linear-gradient(135deg, #4aa3ff 0%, #a07bff 40%, #4ad1a8 100%);
+      border-radius: 12px; filter: blur(0.2px);
+      box-shadow: 0 10px 32px rgba(74,163,255,0.15);
+    }
+    .buttons { display: flex; gap: 16px; }
+    button {
+      padding: 12px 16px; border: none; border-radius: 10px; cursor: pointer;
+      font-weight: 700; letter-spacing: .3px; color: #0b1220;
+    }
+    #startBtn { background: var(--accent); }
+    #stopBtn { background: #2d3a52; color: #c9d6ea; }
+    #stopBtn.enabled { background: #3b4f70; }
+    #stopBtn.danger { background: var(--danger); color: #fff; }
+
+    .log {
+      background: #0b1220; color: #cfe1ff; border-radius: 12px; padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      width: min(860px, 100%); max-height: 220px; overflow: auto; border: 1px solid #1b2840;
+    }
+
+    .feedback {
+      margin-top: 18px; padding: 18px; border-radius: var(--radius);
+      background: var(--panel); border: 1px solid #1e2a3d;
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      .grid .field { grid-column: span 1; }
+    }
+  </style>
+</head>
+<body>
+  <h1>AI Interview Coach</h1>
+  <div class="subtitle">Practice your interview skills with AI-powered simulation</div>
+
+  <!-- Controls -->
+  <div class="panel">
+    <div class="grid">
+      <div class="field">
+        <label>Company</label>
+        <select id="company">
+          <option>Google</option><option>Microsoft</option><option>Amazon</option>
+          <option>Meta</option><option>Apple</option><option>OpenAI</option>
+          <option selected>Generic</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Job Role</label>
+        <select id="role">
+          <option>Software Engineer</option>
+          <option>Data Scientist</option>
+          <option>Machine Learning Engineer</option>
+          <option>Business Analyst</option>
+          <option>Product Manager</option>
+          <option selected>Software Engineer</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Experience Level</label>
+        <select id="experience">
+          <option>Intern</option><option>Junior</option>
+          <option selected>Mid-level</option><option>Senior</option><option>Lead</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Interview Type</label>
+        <select id="type">
+          <option selected>Technical</option><option>Behavioral</option><option>System Design</option>
+          <option>Case Study</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Difficulty</label>
+        <select id="difficulty">
+          <option>Easy</option><option selected>Medium</option><option>Hard</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Duration</label>
+        <select id="duration">
+          <option value="3">3 minutes</option>
+          <option value="5" selected>5 minutes</option>
+          <option value="10">10 minutes</option>
+          <option value="15">15 minutes</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stage -->
+  <div class="stage">
+    <div id="timer" class="timer">00:00</div>
+    <div class="wave"></div>
+    <div class="buttons">
+      <button id="startBtn">▶️ START INTERVIEW</button>
+      <button id="stopBtn" disabled>⏹ END INTERVIEW</button>
     </div>
     <audio id="remote" autoplay></audio>
-    <div id="log"></div>
+    <div id="log" class="log"></div>
+  </div>
 
-    <script>
-      const startBtn = document.getElementById('start');
-      const stopBtn  = document.getElementById('stop');
-      const remoteEl = document.getElementById('remote');
-      const logEl    = document.getElementById('log');
+  <div class="feedback">
+    <h2>Final Feedback</h2>
+    <div id="feedbackText" style="color:#cfe1ff; opacity:.9;">(Will be spoken by AI after the interview. We’ll also mirror key lines here.)</div>
+  </div>
 
-      let pc, dc, localStream, ek;
+<script>
+  const companyEl = document.getElementById('company');
+  const roleEl = document.getElementById('role');
+  const experienceEl = document.getElementById('experience');
+  const typeEl = document.getElementById('type');
+  const difficultyEl = document.getElementById('difficulty');
+  const durationEl = document.getElementById('duration');
 
-      function log(msg){ logEl.textContent += msg + "\n"; }
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn  = document.getElementById('stopBtn');
+  const timerEl  = document.getElementById('timer');
+  const logEl    = document.getElementById('log');
+  const feedbackEl = document.getElementById('feedbackText');
+  const remoteEl = document.getElementById('remote');
 
-      async function start() {
-        startBtn.disabled = true;
+  let pc, dc, localStream, interval, secs = 0, running = false;
+
+  function log(t){ logEl.textContent += t + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+
+  function formatMMSS(s){
+    const m = Math.floor(s/60).toString().padStart(2,'0');
+    const ss = (s%60).toString().padStart(2,'0');
+    return `${m}:${ss}`;
+  }
+
+  function startTimer(){
+    secs = 0;
+    timerEl.textContent = "00:00";
+    interval = setInterval(() => {
+      secs++; timerEl.textContent = formatMMSS(secs);
+    }, 1000);
+  }
+  function stopTimer(){ clearInterval(interval); }
+
+  async function startInterview(){
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    stopBtn.classList.add('enabled');
+    log('Starting interview…');
+
+    try {
+      // 1) ask backend for ephemeral key with your selected config
+      const cfg = {
+        company: companyEl.value,
+        role: roleEl.value,
+        experience: experienceEl.value,
+        type: typeEl.value,
+        difficulty: difficultyEl.value,
+        durationMinutes: Number(durationEl.value)
+      };
+
+      const ekResp = await fetch('/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg)
+      });
+      const { ephemeral_key } = await ekResp.json();
+      if(!ephemeral_key) throw new Error('No ephemeral key returned');
+      log('Ephemeral key received.');
+
+      // 2) get mic
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const track = localStream.getAudioTracks()[0];
+
+      // 3) set up peer connection
+      pc = new RTCPeerConnection();
+      pc.ontrack = (e) => { remoteEl.srcObject = e.streams[0]; };
+      pc.addTrack(track, localStream);
+
+      // data channel for events/messages
+      dc = pc.createDataChannel('oai-events');
+      dc.onopen = () => log('DataChannel open.');
+      dc.onmessage = (ev) => {
+        // Realtime may send JSON event messages. We’ll mirror any text we can parse.
         try {
-          // 1) Ask our backend for an ephemeral key
-          const ekResp = await fetch('/session', { method: 'POST' });
-          const { ephemeral_key } = await ekResp.json();
-          if(!ephemeral_key) throw new Error('No ephemeral key returned');
-          ek = ephemeral_key;
-          log('Ephemeral key obtained.');
-
-          // 2) Get mic
-          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          const track = localStream.getAudioTracks()[0];
-
-          // 3) Set up WebRTC PeerConnection
-          pc = new RTCPeerConnection();
-          pc.ontrack = (e) => { remoteEl.srcObject = e.streams[0]; };
-          pc.addTrack(track, localStream);
-
-          // Data channel to exchange events/messages if needed
-          dc = pc.createDataChannel('oai-events');
-          dc.onopen = () => log('DataChannel open.');
-          dc.onmessage = (ev) => log('DC message: ' + ev.data);
-
-          // 4) Create SDP offer
-          const offer = await pc.createOffer({ offerToReceiveAudio: true });
-          await pc.setLocalDescription(offer);
-
-          // 5) Send offer SDP to OpenAI Realtime; auth with ephemeral key
-          const realtimeUrl = 'https://api.openai.com/v1/realtime?model=gpt-realtime';
-          const sdpResp = await fetch(realtimeUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${ek}`,
-              'Content-Type': 'application/sdp'
-            },
-            body: offer.sdp
-          });
-          if(!sdpResp.ok){
-            const txt = await sdpResp.text();
-            throw new Error('Realtime SDP exchange failed: ' + txt);
+          const msg = JSON.parse(ev.data);
+          if (msg?.type?.includes('response.output_text.delta') && msg?.delta) {
+            feedbackEl.textContent += msg.delta;
           }
-          const answerSDP = await sdpResp.text();
-          await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP });
+        } catch {
+          // not JSON; ignore or log raw
+          // log('DC: ' + ev.data);
+        }
+      };
 
-          // 6) (Optional) Nudge the coach to begin with a greeting over the data channel
-          // Many Realtime setups will auto-greet based on session instructions; if not, send a message:
-          setTimeout(() => {
-            if (dc?.readyState === 'open') {
-              dc.send(JSON.stringify({
-                type: 'response.create',
-                response: { instructions: 'Please start with one interview question.' }
-              }));
+      const offer = await pc.createOffer({ offerToReceiveAudio: true });
+      await pc.setLocalDescription(offer);
+
+      // 4) send SDP to OpenAI with the ephemeral token
+      const sdpResp = await fetch('https://api.openai.com/v1/realtime?model=gpt-realtime', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${ephemeral_key}`,
+          'Content-Type': 'application/sdp'
+        },
+        body: offer.sdp
+      });
+      if (!sdpResp.ok) {
+        const txt = await sdpResp.text();
+        throw new Error('Realtime SDP exchange failed: ' + txt);
+      }
+      const answerSDP = await sdpResp.text();
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP });
+
+      running = true;
+      startTimer();
+      log('Connected. The interviewer will begin shortly…');
+
+      // Optional: nudge start in case model waits
+      setTimeout(() => {
+        if (dc?.readyState === 'open') {
+          dc.send(JSON.stringify({
+            type: 'response.create',
+            response: {
+              instructions: 'Begin the interview now.'
             }
-          }, 1200);
-
-          stopBtn.disabled = false;
-          log('Connected. Speak when ready.');
-        } catch (e) {
-          log('Error: ' + e.message);
-          startBtn.disabled = false;
+          }));
         }
-      }
+      }, 1200);
 
-      async function stop() {
-        stopBtn.disabled = true;
-        try {
-          if (dc) dc.close();
-          if (pc) pc.close();
-          localStream?.getTracks()?.forEach(t => t.stop());
-          log('Stopped.');
-        } finally {
-          startBtn.disabled = false;
-        }
-      }
+    } catch(e) {
+      log('Error: ' + e.message);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      stopBtn.classList.remove('enabled');
+    }
+  }
 
-      startBtn.onclick = start;
-      stopBtn.onclick = stop;
-    </script>
-  </body>
+  async function endInterview(manual = false){
+    if (!running) return;
+    running = false;
+    stopTimer();
+    stopBtn.disabled = true;
+    stopBtn.classList.remove('enabled');
+    stopBtn.classList.add('danger');
+    log('Ending interview…');
+
+    try {
+      // Politely tell the agent to wrap and ask about feedback
+      if (dc?.readyState === 'open') {
+        dc.send(JSON.stringify({
+          type: 'response.create',
+          response: {
+            instructions: manual
+              ? 'Please end the interview now and ask: "The interview is complete. Would you like to hear your feedback?"'
+              : 'The time is up. Please end the interview now and ask: "The interview is complete. Would you like to hear your feedback?"'
+          }
+        }));
+      }
+    } catch {}
+
+    // We leave the connection open so the user can say "yes" to hear feedback.
+    // If you want to hard-close after some seconds, uncomment below.
+    // setTimeout(() => { dc?.close(); pc?.close(); localStream?.getTracks()?.forEach(t=>t.stop()); }, 15000);
+
+    startBtn.disabled = false;
+  }
+
+  startBtn.onclick = startInterview;
+  stopBtn.onclick = () => endInterview(true);
+
+  // Auto-stop after selected duration (soft stop: ask for feedback)
+  setInterval(() => {
+    if (!running) return;
+    const maxSecs = Number(durationEl.value) * 60;
+    if (secs >= maxSecs) endInterview(false);
+  }, 1000);
+</script>
+</body>
 </html>
