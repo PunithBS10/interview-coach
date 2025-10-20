@@ -5,29 +5,26 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// --- Setup paths ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// --- Serve static frontend files (index.html etc.) ---
-app.use(express.static(path.join(__dirname, '../web')));
+// Serve static frontend from /public
+app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Create ephemeral session key for Realtime Voice ---
+// Create ephemeral session key
 app.post('/session', async (req, res) => {
   try {
     const body = {
-      model: 'gpt-realtime-mini-2025-10-06', // ✅ use realtime model shown in your image
+      model: 'gpt-realtime-mini', // or 'gpt-realtime'
       voice: 'verse',
       instructions:
         "You are a friendly real-time interview coach. Ask one interview question at a time, " +
-        "listen completely, then give short, constructive feedback (under 20 seconds)."
+        "listen completely, then provide short, constructive feedback (under 20 seconds)."
     };
 
-    // ✅ Correct endpoint for realtime sessions
     const resp = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',
       headers: {
@@ -46,7 +43,6 @@ app.post('/session', async (req, res) => {
     const json = await resp.json();
     const ek = json?.client_secret?.value;
     if (!ek) return res.status(500).json({ error: 'No ephemeral key in response.' });
-
     res.json({ ephemeral_key: ek });
   } catch (err) {
     console.error('Server error:', err);
@@ -54,13 +50,12 @@ app.post('/session', async (req, res) => {
   }
 });
 
-// --- Default route (optional friendly message) ---
-app.get('/', (req, res) => {
-  res.send('Interview Coach server is running. Open /index.html to start.');
+// Fallback to index.html for any route
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// --- Start server ---
 const PORT = process.env.PORT || 8787;
 app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
