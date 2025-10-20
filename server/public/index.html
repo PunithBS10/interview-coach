@@ -33,7 +33,7 @@
         startBtn.disabled = true;
         try {
           // 1) Ask our backend for an ephemeral key
-          const ekResp = await fetch('http://localhost:8787/session', { method: 'POST' });
+          const ekResp = await fetch('/session', { method: 'POST' });
           const { ephemeral_key } = await ekResp.json();
           if(!ephemeral_key) throw new Error('No ephemeral key returned');
           ek = ephemeral_key;
