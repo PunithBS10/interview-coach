@@ -185,6 +185,7 @@
   const remoteEl = document.getElementById('remote');
 
   let pc, dc, localStream, interval, secs = 0, running = false;
+  let startedOnce = false; // ✅ ensures AI greeting happens only once per session
 
   function log(t){ logEl.textContent += t + "\n"; logEl.scrollTop = logEl.scrollHeight; }
 
@@ -279,13 +280,14 @@
 
       // Optional: nudge start in case model waits
       setTimeout(() => {
-        if (dc?.readyState === 'open') {
+        if (!startedOnce && dc?.readyState === 'open') {
           dc.send(JSON.stringify({
             type: 'response.create',
             response: {
               instructions: 'Begin the interview now.'
             }
           }));
+          startedOnce = true; // ensure we never send it again
         }
       }, 1200);
 
@@ -297,7 +299,7 @@
     }
   }
 
-  async function endInterview(manual = false){
+  async function endInterview(manual = false) {
     if (!running) return;
     running = false;
     stopTimer();
@@ -305,27 +307,35 @@
     stopBtn.classList.remove('enabled');
     stopBtn.classList.add('danger');
     log('Ending interview…');
-
+  
     try {
-      // Politely tell the agent to wrap and ask about feedback
       if (dc?.readyState === 'open') {
         dc.send(JSON.stringify({
           type: 'response.create',
           response: {
             instructions: manual
-              ? 'Please end the interview now and ask: "The interview is complete. Would you like to hear your feedback?"'
-              : 'The time is up. Please end the interview now and ask: "The interview is complete. Would you like to hear your feedback?"'
+              ? 'Please end the interview immediately, thank the candidate politely, and stop speaking.'
+              : 'The time is up. End the interview immediately, thank the candidate politely, and stop speaking.'
           }
         }));
       }
-    } catch {}
-
-    // We leave the connection open so the user can say "yes" to hear feedback.
-    // If you want to hard-close after some seconds, uncomment below.
-    // setTimeout(() => { dc?.close(); pc?.close(); localStream?.getTracks()?.forEach(t=>t.stop()); }, 15000);
-
+    } catch (e) {
+      log('Error ending session: ' + e.message);
+    }
+  
+    // ✅ Properly close all connections
+    setTimeout(() => {
+      try {
+        dc?.close();
+        pc?.close();
+        localStream?.getTracks()?.forEach(t => t.stop());
+        log('Interview session closed.');
+      } catch {}
+    }, 3000);
+  
     startBtn.disabled = false;
   }
+
 
   startBtn.onclick = startInterview;
   stopBtn.onclick = () => endInterview(true);
