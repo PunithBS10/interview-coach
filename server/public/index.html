@@ -183,7 +183,32 @@
   let vizCtx, audioCtx, analyserMic, analyserRemote, vizAnim;
 
   let pc, dc, localStream, interval, secs = 0, running = false;
-  let startedOnce = false; // ✅ ensures AI greeting happens only once per session
+  let startedOnce = false; // ensures kickoff only once per session
+  let interviewStarted = false; // kickoff sent
+  let heardInterviewerOnce = false; // remote audio detected
+  let lastRemoteActiveMs = 0;
+
+  function resetFlags(){
+    startedOnce = false;
+    interviewStarted = false;
+    heardInterviewerOnce = false;
+    lastRemoteActiveMs = 0;
+    secs = 0;
+    running = false;
+  }
+
+  function closeMedia(){
+    try { localStream?.getTracks()?.forEach(t => t.stop()); } catch {}
+    localStream = null;
+    try { remoteEl.srcObject = null; } catch {}
+  }
+
+  function closeRTC(){
+    try { dc?.close(); } catch {}
+    try { pc?.getSenders()?.forEach(s => { try { s.track?.stop(); } catch {} }); } catch {}
+    try { pc?.close(); } catch {}
+    dc = null; pc = null;
+  }
 
   function log(t){ logEl.textContent += t + "\n"; logEl.scrollTop = logEl.scrollHeight; }
 
@@ -227,6 +252,7 @@
       window.addEventListener('resize', resizeCanvas);
       resizeCanvas();
       drawVisualizer();
+      startMicSilenceMonitor();
     } catch (e) {
       log('Visualizer error: ' + e.message);
     }
@@ -280,7 +306,69 @@
       const buf2 = new Uint8Array(analyserRemote.fftSize);
       analyserRemote.getByteTimeDomainData(buf2);
       drawWave(buf2, '#4ad1a8', 0.7);
+      // detect interviewer activity
+      let sum = 0;
+      for (let i = 0; i < buf2.length; i++) sum += Math.abs(buf2[i] - 128);
+      const amp = (sum / buf2.length) / 128;
+      if (amp > 0.03) {
+        heardInterviewerOnce = true;
+        lastRemoteActiveMs = Date.now();
+      }
     }
+  }
+
+  // --- Silence monitor (mic) ---
+  let silenceInt = null, silenceSec = 0, silencePing1 = false, silencePing2 = false;
+  function startMicSilenceMonitor(){
+    try { if (silenceInt) clearInterval(silenceInt); } catch{}
+    silenceSec = 0; silencePing1 = false; silencePing2 = false;
+    silenceInt = setInterval(() => {
+      if (!running || !analyserMic) return;
+      // Only monitor silence after the interviewer has spoken at least once
+      if (!heardInterviewerOnce) return;
+      const buf = new Uint8Array(analyserMic.fftSize);
+      analyserMic.getByteTimeDomainData(buf);
+      // crude amplitude around midpoint 128
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += Math.abs(buf[i] - 128);
+      const amp = (sum / buf.length) / 128; // 0..~1
+      const silentMic = amp < 0.02;
+
+      // Also ensure interviewer is not currently speaking
+      let remoteSilent = true;
+      if (analyserRemote) {
+        const r = new Uint8Array(analyserRemote.fftSize);
+        analyserRemote.getByteTimeDomainData(r);
+        let rsum = 0; for (let i = 0; i < r.length; i++) rsum += Math.abs(r[i] - 128);
+        const ramp = (rsum / r.length) / 128;
+        remoteSilent = ramp < 0.03;
+        if (!remoteSilent) lastRemoteActiveMs = Date.now();
+      }
+
+      // Give at least 1s after interviewer finished speaking before counting
+      const quietSinceRemote = Date.now() - lastRemoteActiveMs;
+      const okWindow = quietSinceRemote > 1000;
+
+      if (silentMic && remoteSilent && okWindow) silenceSec += 0.5; else silenceSec = 0;
+      if (silenceSec >= 10 && !silencePing1 && dc?.readyState === 'open') {
+        dc.send(JSON.stringify({
+          type: 'response.create',
+          response: { instructions: "Are you there? Please go ahead when you're ready." }
+        }));
+        silencePing1 = true;
+      }
+      if (silenceSec >= 20 && !silencePing2 && dc?.readyState === 'open') {
+        dc.send(JSON.stringify({
+          type: 'response.create',
+          response: { instructions: "I'll move to the next question. Please answer when ready; do not restart or reintroduce yourself." }
+        }));
+        silencePing2 = true;
+      }
+    }, 500);
+  }
+  function stopMicSilenceMonitor(){
+    try { if (silenceInt) clearInterval(silenceInt); } catch{}
+    silenceInt = null; silenceSec = 0; silencePing1 = false; silencePing2 = false;
   }
 
   function stopVisualizer(){
@@ -289,9 +377,17 @@
     try { window.removeEventListener('resize', resizeCanvas); } catch {}
     try { audioCtx?.close(); } catch {}
     audioCtx = null; vizCtx = null; analyserMic = null; analyserRemote = null;
+    stopMicSilenceMonitor();
   }
 
   async function startInterview(){
+    // Make sure any previous session is fully closed
+    try { stopVisualizer(); } catch {}
+    stopMicSilenceMonitor?.();
+    closeRTC();
+    closeMedia();
+    resetFlags();
+
     startBtn.disabled = true;
     stopBtn.disabled = false;
     stopBtn.classList.add('enabled');
@@ -332,8 +428,21 @@
 
       // data channel for events/messages
       dc = pc.createDataChannel('oai-events');
-      dc.onopen = () => log('DataChannel open.');
-      // No UI feedback mirroring; ignore data channel messages for now.
+      dc.onopen = () => {
+        log('DataChannel open.');
+        if (!startedOnce && running && pc?.connectionState !== 'closed') {
+          // Single controlled kickoff so the interviewer begins immediately, once.
+          dc.send(JSON.stringify({
+            type: 'response.create',
+            response: {
+              instructions: 'Begin the interview now. Greet once as Sarah, then ask the first question. Do not reintroduce yourself later and do not answer on behalf of the candidate.'
+            }
+          }));
+          startedOnce = true;
+          interviewStarted = true;
+        }
+      };
+      // Ignore any incoming messages for UI
       dc.onmessage = () => {};
 
       const offer = await pc.createOffer({ offerToReceiveAudio: true });
@@ -359,18 +468,7 @@
       startTimer();
       log('Connected. The interviewer will begin shortly…');
 
-      // Optional: nudge start in case model waits
-      setTimeout(() => {
-        if (!startedOnce && dc?.readyState === 'open') {
-          dc.send(JSON.stringify({
-            type: 'response.create',
-            response: {
-              instructions: 'Begin the interview now.'
-            }
-          }));
-          startedOnce = true; // ensure we never send it again
-        }
-      }, 1200);
+      // No auto-nudge; let interviewer begin naturally to avoid double greetings.
 
     } catch(e) {
       log('Error: ' + e.message);
@@ -383,38 +481,20 @@
   async function endInterview(manual = false) {
     if (!running) return;
     running = false;
-    stopTimer(); stopVisualizer();
+    stopTimer();
+    stopVisualizer();
+    stopMicSilenceMonitor?.();
     stopBtn.disabled = true;
     stopBtn.classList.remove('enabled');
     stopBtn.classList.add('danger');
     log('Ending interview…');
-  
-    try {
-      if (dc?.readyState === 'open') {
-        dc.send(JSON.stringify({
-          type: 'response.create',
-          response: {
-            instructions: manual
-              ? 'Please end the interview immediately, thank the candidate politely, and stop speaking.'
-              : 'The time is up. End the interview immediately, thank the candidate politely, and stop speaking.'
-          }
-        }));
-      }
-    } catch (e) {
-      log('Error ending session: ' + e.message);
-    }
-  
-    // ✅ Properly close all connections
-    setTimeout(() => {
-      try {
-        dc?.close();
-        pc?.close();
-        localStream?.getTracks()?.forEach(t => t.stop());
-        log('Interview session closed.');
-      } catch {}
-    }, 3000);
-  
+
+    // Close everything immediately to ensure a fresh next start
+    closeRTC();
+    closeMedia();
+    resetFlags();
     startBtn.disabled = false;
+    log('Interview session closed.');
   }
 
 
