@@ -62,11 +62,14 @@
       font-size: 54px; font-weight: 800; letter-spacing: 3px; color: #9fc4ff;
       text-shadow: 0 10px 24px rgba(159,196,255,.25);
     }
-    .wave {
-      width: min(560px, 92%); height: 200px;
+    /* Realtime visualizer canvas */
+    #visualizer {
+      width: min(560px, 92%);
+      height: 200px;
       background: linear-gradient(135deg, #4aa3ff 0%, #a07bff 40%, #4ad1a8 100%);
-      border-radius: 12px; filter: blur(0.2px);
+      border-radius: 12px;
       box-shadow: 0 10px 32px rgba(74,163,255,0.15);
+      display: block;
     }
     .buttons { display: flex; gap: 16px; }
     button {
@@ -84,10 +87,7 @@
       width: min(860px, 100%); max-height: 220px; overflow: auto; border: 1px solid #1b2840;
     }
 
-    .feedback {
-      margin-top: 18px; padding: 18px; border-radius: var(--radius);
-      background: var(--panel); border: 1px solid #1e2a3d;
-    }
+    
     @media (max-width: 980px) {
       .grid { grid-template-columns: repeat(2, 1fr); }
       .grid .field { grid-column: span 1; }
@@ -155,7 +155,7 @@
   <!-- Stage -->
   <div class="stage">
     <div id="timer" class="timer">00:00</div>
-    <div class="wave"></div>
+    <canvas id="visualizer"></canvas>
     <div class="buttons">
       <button id="startBtn">▶️ START INTERVIEW</button>
       <button id="stopBtn" disabled>⏹ END INTERVIEW</button>
@@ -164,10 +164,7 @@
     <div id="log" class="log"></div>
   </div>
 
-  <div class="feedback">
-    <h2>Final Feedback</h2>
-    <div id="feedbackText" style="color:#cfe1ff; opacity:.9;">(Will be spoken by AI after the interview. We’ll also mirror key lines here.)</div>
-  </div>
+  
 
 <script>
   const companyEl = document.getElementById('company');
@@ -181,8 +178,9 @@
   const stopBtn  = document.getElementById('stopBtn');
   const timerEl  = document.getElementById('timer');
   const logEl    = document.getElementById('log');
-  const feedbackEl = document.getElementById('feedbackText');
   const remoteEl = document.getElementById('remote');
+  const vizCanvas = document.getElementById('visualizer');
+  let vizCtx, audioCtx, analyserMic, analyserRemote, vizAnim;
 
   let pc, dc, localStream, interval, secs = 0, running = false;
   let startedOnce = false; // ✅ ensures AI greeting happens only once per session
@@ -203,6 +201,95 @@
     }, 1000);
   }
   function stopTimer(){ clearInterval(interval); }
+
+  // --- Visualizer helpers ---
+  function resizeCanvas(){
+    if (!vizCanvas) return;
+    const dpr = Math.max(window.devicePixelRatio || 1, 1);
+    const cssW = vizCanvas.clientWidth || 560;
+    const cssH = vizCanvas.clientHeight || 200;
+    vizCanvas.width = Math.floor(cssW * dpr);
+    vizCanvas.height = Math.floor(cssH * dpr);
+    if (vizCtx) {
+      vizCtx.setTransform(1, 0, 0, 1, 0, 0);
+      vizCtx.scale(dpr, dpr);
+    }
+  }
+
+  function startVisualizer(micStream){
+    try {
+      vizCtx = vizCanvas.getContext('2d');
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyserMic = audioCtx.createAnalyser();
+      analyserMic.fftSize = 512;
+      const srcMic = audioCtx.createMediaStreamSource(micStream);
+      srcMic.connect(analyserMic);
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+      drawVisualizer();
+    } catch (e) {
+      log('Visualizer error: ' + e.message);
+    }
+  }
+
+  function attachRemoteVisualizer(remoteStream){
+    if (!audioCtx) return;
+    try {
+      analyserRemote = audioCtx.createAnalyser();
+      analyserRemote.fftSize = 512;
+      const srcRemote = audioCtx.createMediaStreamSource(remoteStream);
+      srcRemote.connect(analyserRemote);
+    } catch (e) {
+      // Non-fatal
+    }
+  }
+
+  function drawWave(data, color, alpha){
+    const w = vizCanvas.clientWidth;
+    const h = vizCanvas.clientHeight;
+    const len = data.length;
+    const slice = w / len;
+    vizCtx.save();
+    vizCtx.globalAlpha = alpha;
+    vizCtx.lineWidth = 2;
+    vizCtx.strokeStyle = color;
+    vizCtx.beginPath();
+    for (let i = 0; i < len; i++) {
+      const v = data[i] / 128.0;
+      const y = (v * h) / 2; // center around midline
+      const x = i * slice;
+      if (i === 0) vizCtx.moveTo(x, y);
+      else vizCtx.lineTo(x, y);
+    }
+    vizCtx.stroke();
+    vizCtx.restore();
+  }
+
+  function drawVisualizer(){
+    if (!vizCtx) return;
+    vizAnim = requestAnimationFrame(drawVisualizer);
+    // Clear to transparent to let CSS gradient show
+    vizCtx.clearRect(0, 0, vizCanvas.clientWidth, vizCanvas.clientHeight);
+
+    if (analyserMic) {
+      const buf = new Uint8Array(analyserMic.fftSize);
+      analyserMic.getByteTimeDomainData(buf);
+      drawWave(buf, '#4aa3ff', 0.9);
+    }
+    if (analyserRemote) {
+      const buf2 = new Uint8Array(analyserRemote.fftSize);
+      analyserRemote.getByteTimeDomainData(buf2);
+      drawWave(buf2, '#4ad1a8', 0.7);
+    }
+  }
+
+  function stopVisualizer(){
+    try { if (vizAnim) cancelAnimationFrame(vizAnim); } catch {}
+    vizAnim = null;
+    try { window.removeEventListener('resize', resizeCanvas); } catch {}
+    try { audioCtx?.close(); } catch {}
+    audioCtx = null; vizCtx = null; analyserMic = null; analyserRemote = null;
+  }
 
   async function startInterview(){
     startBtn.disabled = true;
@@ -233,27 +320,21 @@
       // 2) get mic
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const track = localStream.getAudioTracks()[0];
+      startVisualizer(localStream);
 
       // 3) set up peer connection
       pc = new RTCPeerConnection();
-      pc.ontrack = (e) => { remoteEl.srcObject = e.streams[0]; };
+      pc.ontrack = (e) => { 
+        remoteEl.srcObject = e.streams[0];
+        attachRemoteVisualizer(e.streams[0]);
+      };
       pc.addTrack(track, localStream);
 
       // data channel for events/messages
       dc = pc.createDataChannel('oai-events');
       dc.onopen = () => log('DataChannel open.');
-      dc.onmessage = (ev) => {
-        // Realtime may send JSON event messages. We’ll mirror any text we can parse.
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg?.type?.includes('response.output_text.delta') && msg?.delta) {
-            feedbackEl.textContent += msg.delta;
-          }
-        } catch {
-          // not JSON; ignore or log raw
-          // log('DC: ' + ev.data);
-        }
-      };
+      // No UI feedback mirroring; ignore data channel messages for now.
+      dc.onmessage = () => {};
 
       const offer = await pc.createOffer({ offerToReceiveAudio: true });
       await pc.setLocalDescription(offer);
@@ -302,7 +383,7 @@
   async function endInterview(manual = false) {
     if (!running) return;
     running = false;
-    stopTimer();
+    stopTimer(); stopVisualizer();
     stopBtn.disabled = true;
     stopBtn.classList.remove('enabled');
     stopBtn.classList.add('danger');
