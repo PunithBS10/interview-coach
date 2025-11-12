@@ -51,6 +51,8 @@ app.post('/session', async (req, res) => {
     7. If the user says yes, provide feedback once and stop.
       
     ### Rules
+    - Wait silently until you receive the explicit start signal: "Begin the interview now." from the client. Do not speak before that signal.
+    - If duplicate start signals arrive, ignore them after the first; never restart or re-greet.
     - Never reintroduce yourself after starting.
     - Never say “Let’s begin again” or “Hello” mid-interview.
     - Never reset or restart conversation flow.
@@ -114,4 +116,75 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 8787;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
+});
+
+/**
+ * POST /chat
+ * Body: { cfg: { company, role, experience, type, difficulty, durationMinutes }, messages: [{role, content}] }
+ * Returns: { text }
+ */
+app.post('/chat', async (req, res) => {
+  try {
+    const cfg = req.body?.cfg || {};
+    const {
+      company = 'Generic',
+      role = 'Software Engineer',
+      experience = 'Mid-level',
+      type = 'Technical',
+      difficulty = 'Medium',
+      durationMinutes = 5,
+    } = cfg;
+
+    const baseInstructions = `
+You are an experienced interviewer named Sarah conducting a professional mock interview in English.
+Speak naturally and concisely. Ask one question at a time and wait for the candidate's response.
+Never answer on behalf of the candidate. Do not restart or repeat greetings after the start.
+At the end, ask once if they want feedback; only provide it if they request it.
+
+Context:
+Company: ${company}
+Role: ${role}
+Experience Level: ${experience}
+Interview Type: ${type}
+Difficulty: ${difficulty}
+Duration: ~${durationMinutes} minutes.
+
+Flow:
+1) Greet once: "Hello, I'm Sarah. I'll be conducting your interview today."
+2) Briefly explain the structure, then ask the first question.
+3) Continue one question at a time without restarting.
+`;
+
+    const userMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const messages = [
+      { role: 'system', content: baseInstructions },
+      ...userMessages,
+    ];
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.7,
+        messages,
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.error('Error from OpenAI (chat):', text);
+      return res.status(resp.status).json({ error: text });
+    }
+
+    const json = await resp.json();
+    const text = json?.choices?.[0]?.message?.content || '';
+    res.json({ text });
+  } catch (err) {
+    console.error('Server error (/chat):', err);
+    res.status(500).json({ error: String(err) });
+  }
 });

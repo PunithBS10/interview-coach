@@ -51,6 +51,13 @@
     }
     select:focus { border-color: var(--accent-2); }
 
+    .mode-toggle { display: inline-flex; background: var(--panel-dark); border: 1px solid #26344a; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 14px rgba(74,163,255,0.12); }
+    .mode-toggle button { background: transparent; color: var(--text); padding: 10px 14px; border: none; cursor: pointer; transition: background .2s ease, color .2s ease, transform .15s ease; }
+    .mode-toggle button.active { background: var(--accent-2); color: #061226; transform: translateY(-1px); }
+    .switch-row { display:flex; justify-content:center; margin: 10px 0 6px; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .appear { animation: fadeInUp .25s ease both; }
+
     .stage {
       margin-top: 18px;
       padding: 24px; border-radius: var(--radius);
@@ -86,6 +93,14 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       width: min(860px, 100%); max-height: 220px; overflow: auto; border: 1px solid #1b2840;
     }
+    .text-box { width: min(860px, 100%); min-height: 260px; max-height: 420px; overflow: auto; }
+    .msg { margin: 6px 0; }
+    .msg.user { color: #b0ffc8; }
+    .msg.ai { color: #cfe1ff; }
+    .text-input { display: flex; gap: 8px; width: min(860px, 100%); }
+    .text-input input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #26344a; background: var(--panel-dark); color: var(--text); }
+    .text-input button { padding: 12px 16px; border-radius: 10px; border: none; cursor: pointer; font-weight: 700; }
+    #textSendBtn { background: var(--accent-2); color: #061226; }
 
     
     @media (max-width: 980px) {
@@ -152,8 +167,16 @@
     </div>
   </div>
 
-  <!-- Stage -->
-  <div class="stage">
+  <!-- Mode Switch -->
+  <div class="switch-row">
+    <div class="mode-toggle" id="modeToggle">
+      <button id="modeVoice" class="active">Voice</button>
+      <button id="modeText">Text</button>
+    </div>
+  </div>
+
+  <!-- Stage: Voice -->
+  <div class="stage" id="voiceStage">
     <div id="timer" class="timer">00:00</div>
     <canvas id="visualizer"></canvas>
     <div class="buttons">
@@ -164,7 +187,18 @@
     <div id="log" class="log"></div>
   </div>
 
-  
+  <!-- Stage: Text -->
+  <div class="stage" id="textStage" style="display:none">
+    <div id="textLog" class="log text-box"></div>
+    <div class="text-input">
+      <input id="textInput" placeholder="Type your answer…" />
+      <button id="textSendBtn" disabled>Send</button>
+    </div>
+    <div class="buttons">
+      <button id="textStartBtn">START INTERVIEW</button>
+      <button id="textEndBtn" disabled>END INTERVIEW</button>
+    </div>
+  </div>
 
 <script>
   const companyEl = document.getElementById('company');
@@ -181,6 +215,13 @@
   const remoteEl = document.getElementById('remote');
   const vizCanvas = document.getElementById('visualizer');
   let vizCtx, audioCtx, analyserMic, analyserRemote, vizAnim;
+  // Mode controls and sections
+  const modeToggle = document.getElementById('modeToggle');
+  const modeVoiceBtn = document.getElementById('modeVoice');
+  const modeTextBtn  = document.getElementById('modeText');
+  const voiceStage = document.getElementById('voiceStage');
+  const textStage = document.getElementById('textStage');
+  let mode = 'voice';
 
   let pc, dc, localStream, interval, secs = 0, running = false;
   let startedOnce = false; // ensures kickoff only once per session
@@ -500,6 +541,103 @@
 
   startBtn.onclick = startInterview;
   stopBtn.onclick = () => endInterview(true);
+
+  // Text mode elements/state
+  const textLogEl = document.getElementById('textLog');
+  const textInputEl = document.getElementById('textInput');
+  const textSendBtn = document.getElementById('textSendBtn');
+  const textStartBtn = document.getElementById('textStartBtn');
+  const textEndBtn = document.getElementById('textEndBtn');
+  let textRunning = false;
+  let textMessages = [];
+
+  function addMsg(role, text){
+    const div = document.createElement('div');
+    div.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+    div.textContent = (role === 'user' ? 'You: ' : 'Sarah: ') + text;
+    textLogEl.appendChild(div); textLogEl.scrollTop = textLogEl.scrollHeight;
+  }
+
+  async function chatRequest(messages){
+    const cfg = {
+      company: companyEl.value,
+      role: roleEl.value,
+      experience: experienceEl.value,
+      type: typeEl.value,
+      difficulty: difficultyEl.value,
+      durationMinutes: Number(durationEl.value)
+    };
+    const resp = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cfg, messages })
+    });
+    if (!resp.ok) throw new Error('Chat error: ' + await resp.text());
+    const json = await resp.json();
+    return json.text || '';
+  }
+
+  async function startTextInterview(){
+    if (textRunning) return;
+    // ensure voice is off when switching modes
+    try { endInterview(true); } catch {}
+    textRunning = true; textStartBtn.disabled = true; textEndBtn.disabled = false; textSendBtn.disabled = false;
+    textLogEl.textContent = '';
+    textMessages = [{ role: 'user', content: 'Begin the interview now. Greet once as Sarah, then ask the first question.' }];
+    addMsg('user', 'Begin the interview now.');
+    try {
+      const reply = await chatRequest(textMessages);
+      textMessages.push({ role: 'assistant', content: reply });
+      addMsg('assistant', reply);
+    } catch(e){ addMsg('assistant', 'Error: ' + e.message); }
+  }
+
+  async function sendText(){
+    if (!textRunning) return;
+    const val = textInputEl.value.trim();
+    if (!val) return;
+    textInputEl.value = '';
+    textMessages.push({ role: 'user', content: val });
+    addMsg('user', val);
+    try {
+      const reply = await chatRequest(textMessages);
+      textMessages.push({ role: 'assistant', content: reply });
+      addMsg('assistant', reply);
+    } catch(e){ addMsg('assistant', 'Error: ' + e.message); }
+  }
+
+  function endTextInterview(){
+    textRunning = false; textStartBtn.disabled = false; textEndBtn.disabled = true; textSendBtn.disabled = true;
+    textMessages = [];
+  }
+
+  textStartBtn.onclick = startTextInterview;
+  textEndBtn.onclick = endTextInterview;
+  textSendBtn.onclick = sendText;
+  textInputEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendText(); });
+
+  function setMode(newMode){
+    if (newMode === mode) return;
+    mode = newMode;
+    if (mode === 'voice') {
+      textStage.style.display = 'none';
+      voiceStage.style.display = '';
+      voiceStage.classList.add('appear'); setTimeout(()=>voiceStage.classList.remove('appear'), 300);
+      modeVoiceBtn.classList.add('active');
+      modeTextBtn.classList.remove('active');
+    } else {
+      // ensure voice session is closed before switching
+      try { endInterview(true); } catch {}
+      voiceStage.style.display = 'none';
+      textStage.style.display = '';
+      textStage.classList.add('appear'); setTimeout(()=>textStage.classList.remove('appear'), 300);
+      modeTextBtn.classList.add('active');
+      modeVoiceBtn.classList.remove('active');
+    }
+  }
+
+  modeVoiceBtn.onclick = () => setMode('voice');
+  modeTextBtn.onclick  = () => setMode('text');
 
   // Auto-stop after selected duration (soft stop: ask for feedback)
   setInterval(() => {
