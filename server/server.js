@@ -188,3 +188,87 @@ Flow:
     res.status(500).json({ error: String(err) });
   }
 });
+
+/**
+ * POST /faq
+ * Body: { cfg: { company, role, experience, type, difficulty }, count?: number }
+ * Returns: { faqs: [{ q, a }] }
+ */
+app.post('/faq', async (req, res) => {
+  try {
+    const cfg = req.body?.cfg || {};
+    const count = Math.min(Math.max(Number(req.body?.count) || 8, 3), 15);
+    const {
+      company = 'Generic',
+      role = 'Software Engineer',
+      experience = 'Mid-level',
+      type = 'Technical',
+      difficulty = 'Medium',
+    } = cfg;
+
+    const system = `You are Sarah, a professional interviewer and coach. Generate concise interview Q&A.`;
+    const user = `Create ${count} interview FAQs as JSON for study only.
+Return strictly JSON with the shape: { "faqs": [ { "q": string, "a": string } ] }.
+
+Context:
+Company: ${company}
+Role: ${role}
+Experience Level: ${experience}
+Interview Type: ${type}
+Difficulty: ${difficulty}
+
+Guidelines:
+- Make questions realistic and targeted to the role/type.
+- Keep answers short (2-5 sentences) and practical.
+- Do not include markdown or backticks. JSON only.`;
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.4,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.error('Error from OpenAI (/faq):', text);
+      return res.status(resp.status).json({ error: text });
+    }
+
+    const json = await resp.json();
+    const content = json?.choices?.[0]?.message?.content || '';
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      // Try to salvage JSON substring
+      const start = content.indexOf('{');
+      const end = content.lastIndexOf('}');
+      if (start >= 0 && end > start) {
+        try { parsed = JSON.parse(content.slice(start, end + 1)); } catch {}
+      }
+    }
+
+    if (!parsed?.faqs || !Array.isArray(parsed.faqs)) {
+      return res.status(200).json({ faqs: [] });
+    }
+    // Coerce to expected shape
+    const faqs = parsed.faqs
+      .filter(it => it && typeof it.q === 'string' && typeof it.a === 'string')
+      .map(it => ({ q: it.q.trim(), a: it.a.trim() }))
+      .slice(0, count);
+    res.json({ faqs });
+  } catch (err) {
+    console.error('Server error (/faq):', err);
+    res.status(500).json({ error: String(err) });
+  }
+});

@@ -102,6 +102,19 @@
     .text-input button { padding: 12px 16px; border-radius: 10px; border: none; cursor: pointer; font-weight: 700; }
     #textSendBtn { background: var(--accent-2); color: #061226; }
 
+    /* FAQ styles */
+    .faq-panel { margin-top: 18px; }
+    .faq-title { text-align:center; color: #9fb3d1; margin: 4px 0 10px; font-weight: 700; letter-spacing: .3px; }
+    .faq-actions { display:flex; justify-content:center; gap:10px; margin-bottom: 12px; }
+    #genFaqBtn { background: #2d3a52; color: #cfe1ff; }
+    #genFaqBtn.active { background: var(--accent-2); color: #061226; }
+    .faq-list { width: min(860px, 100%); margin: 0 auto; }
+    details.faq { background: #0b1220; border: 1px solid #1b2840; border-radius: 10px; padding: 10px 12px; margin: 8px 0; box-shadow: 0 6px 14px rgba(0,0,0,.18); }
+    details.faq[open] { border-color: #2a3e60; }
+    details.faq summary { cursor: pointer; list-style: none; color: #cfe1ff; font-weight: 700; }
+    details.faq summary::-webkit-details-marker { display:none; }
+    .faq-a { color: #9fb3d1; margin-top: 6px; line-height: 1.5; }
+
     
     @media (max-width: 980px) {
       .grid { grid-template-columns: repeat(2, 1fr); }
@@ -198,6 +211,15 @@
       <button id="textStartBtn">START INTERVIEW</button>
       <button id="textEndBtn" disabled>END INTERVIEW</button>
     </div>
+  </div>
+
+  <!-- FAQs -->
+  <div class="panel faq-panel">
+    <div class="faq-title">Study: FAQs</div>
+    <div class="faq-actions">
+      <button id="genFaqBtn">Generate FAQs from selections</button>
+    </div>
+    <div id="faqList" class="faq-list"></div>
   </div>
 
 <script>
@@ -638,6 +660,46 @@
 
   modeVoiceBtn.onclick = () => setMode('voice');
   modeTextBtn.onclick  = () => setMode('text');
+
+  // --- FAQs ---
+  const faqListEl = document.getElementById('faqList');
+  const genFaqBtn = document.getElementById('genFaqBtn');
+
+  function renderFaqs(items){
+    faqListEl.innerHTML = '';
+    if (!items || !items.length) {
+      const d = document.createElement('div'); d.style.color = '#9fb3d1'; d.style.textAlign='center'; d.textContent = 'No FAQs yet. Click Generate.'; faqListEl.appendChild(d); return;
+    }
+    for (const it of items) {
+      const det = document.createElement('details'); det.className = 'faq';
+      const sum = document.createElement('summary'); sum.textContent = it.q;
+      const ans = document.createElement('div'); ans.className = 'faq-a'; ans.textContent = it.a;
+      det.appendChild(sum); det.appendChild(ans); faqListEl.appendChild(det);
+    }
+  }
+
+  async function generateFaqs(){
+    genFaqBtn.classList.add('active'); genFaqBtn.disabled = true; genFaqBtn.textContent = 'Generating…';
+    try {
+      const cfg = {
+        company: companyEl.value,
+        role: roleEl.value,
+        experience: experienceEl.value,
+        type: typeEl.value,
+        difficulty: difficultyEl.value,
+      };
+      const resp = await fetch('/faq', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cfg, count: 8 }) });
+      const json = await resp.json();
+      renderFaqs(json.faqs || []);
+    } catch(e){
+      renderFaqs([]);
+    } finally {
+      genFaqBtn.disabled = false; genFaqBtn.classList.remove('active'); genFaqBtn.textContent = 'Generate FAQs from selections';
+    }
+  }
+  genFaqBtn.onclick = generateFaqs;
+  // initial placeholder
+  renderFaqs([]);
 
   // Auto-stop after selected duration (soft stop: ask for feedback)
   setInterval(() => {
