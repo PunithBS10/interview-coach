@@ -84,8 +84,16 @@ interview-coach/
 * WebRTC handles live voice streaming
 
 ## 📸 Screenshots
+<img width="957" height="200" alt="image" src="https://github.com/user-attachments/assets/cae3f6b5-a1c1-43c7-856e-adf5412e723b" />
 
-will add screenshots here
+<img width="703" height="485" alt="image" src="https://github.com/user-attachments/assets/868cb975-a71f-4777-8557-c3ba3868fd55" />
+
+<img width="860" height="453" alt="image" src="https://github.com/user-attachments/assets/844e474b-4b37-487e-afac-afa80032aefb" />
+
+<img width="766" height="530" alt="image" src="https://github.com/user-attachments/assets/dff518b8-38b6-44ed-b19f-6153e153183d" />
+
+
+
 
 
 ## 👤 Developer
